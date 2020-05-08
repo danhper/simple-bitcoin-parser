@@ -63,9 +63,11 @@ def format_nbits(value: int) -> bytes:
     >>> format_nbits(680733321990486529407107157001552378184394215934016880640)
     b'0\\xc3\\x1b\\x18'
     """
-    exponent = math.ceil(math.log(value, 256))
-    mantissa = value // (256 ** (exponent - 3))
-    return mantissa.to_bytes(3, "little") + exponent.to_bytes(1, "little")
+    exponent = 0
+    while value > 256 ** 3 or value % 256 == 0:
+        value //= 256
+        exponent += 1
+    return value.to_bytes(3, "little") + (exponent + 3).to_bytes(1, "little")
 
 
 def parse_vector(raw_vector: bytes, parse_element: callable = None) -> (list, int):
@@ -320,4 +322,59 @@ def format_transaction(transaction: dict, with_witness: bool = True) -> bytes:
         for tx_input in transaction["inputs"]:
             result += format_vector(tx_input.get("witnesses", []), format_vector)
     result += transaction["locktime"].to_bytes(4, "little")
+    return result
+
+
+SAMPLE_PROOF = (
+    "00000020ecf348128755dbeea5deb8eddf64566d9d4e59bc65d485000000000000000000901f0d92"
+    "a66ee7dcefd02fa282ca63ce85288bab628253da31ef259b24abe8a0470a385a45960018e8d672f8"
+    "a90a00000d0bdabada1fb6e3cef7f5c6e234621e3230a2f54efc1cba0b16375d9980ecbc023cbef3"
+    "ba8d8632ea220927ec8f95190b30769eb35d87618f210382c9445f192504074f56951b772efa43b8"
+    "9320d9c430b0d156b93b7a1ff316471e715151a0619a39392657f25289eb713168818bd5b37476f1"
+    "bc59b166deaa736d8a58756f9d7ce2aef46d8004c5fe3293d883838f87b5f1da03839878895b7153"
+    "0e9ff89338bb6d4578b3c3135ff3e8671f9a64d43b22e14c2893e8271cecd420f11d2359307403bb"
+    "1f3128885b3912336045269ef909d64576b93e816fa522c8c027fe408700dd4bdee0254c069ccb72"
+    "8d3516fe1e27578b31d70695e3e35483da448f3a951273e018de7f2a8f657064b013c6ede75c74bb"
+    "d7f98fdae1c2ac6789ee7b21a791aa29d60e89fff2d1d2b1ada50aa9f59f403823c8c58bb092dc58"
+    "dc09b28158ca15447da9c3bedb0b160f3fe1668d5a27716e27661bcb75ddbf3468f5c76b7bed1004"
+    "c6b4df4da2ce80b831a7c260b515e6355e1c306373d2233e8de6fda3674ed95d17a01a1f64b27ba8"
+    "8c3676024fbf8d5dd962ffc4d5e9f3b1700763ab88047f7d0000"
+)
+
+
+def parse_merkle_proof(raw_merkle_proof: bytes) -> (dict, int):
+    """Parses a Merkle proof as returned by `gettxoutproof`
+    >>> raw_proof = bytes.fromhex(SAMPLE_PROOF)
+    >>> proof, consumed = parse_merkle_proof(raw_proof)
+    >>> assert(consumed == len(raw_proof))
+    >>> assert(proof["transactions_count"] == 2729)
+    >>> assert(len(proof["hashes"]) == 13)
+    >>> assert(len(proof["flags"]) == 4)
+    >>> expected_merkle_root = bytes.fromhex("a0e8ab249b25ef31da538262ab8b2885ce63ca82a22fd0efdce76ea6920d1f90")[::-1]
+    >>> assert(proof["block_header"]["merkle_root"] == expected_merkle_root)
+    """
+    block_header = parse_block_header(raw_merkle_proof)
+    transactions_count = int.from_bytes(raw_merkle_proof[80:84], "little")
+    hashes, consumed = parse_vector(raw_merkle_proof[84:], lambda x: (x[:32], 32))
+    index = consumed + 84
+    flags, consumed = parse_vector(raw_merkle_proof[index:])
+    return {
+        "block_header": block_header,
+        "transactions_count": transactions_count,
+        "hashes": hashes,
+        "flags": flags,
+    }, consumed + index
+
+
+import difflib
+def format_merkle_proof(proof: dict) -> bytes:
+    """Format a merkle proof into its byte representation
+    >>> raw_proof = bytes.fromhex(SAMPLE_PROOF)
+    >>> proof, _consumed = parse_merkle_proof(raw_proof)
+    >>> assert(format_merkle_proof(proof) == raw_proof)
+    """
+    result = format_block_header(proof["block_header"])
+    result += proof["transactions_count"].to_bytes(4, "little")
+    result += format_vector(proof["hashes"], lambda x: x)
+    result += format_vector(proof["flags"])
     return result
