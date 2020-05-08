@@ -366,7 +366,6 @@ def parse_merkle_proof(raw_merkle_proof: bytes) -> (dict, int):
     }, consumed + index
 
 
-import difflib
 def format_merkle_proof(proof: dict) -> bytes:
     """Format a merkle proof into its byte representation
     >>> raw_proof = bytes.fromhex(SAMPLE_PROOF)
